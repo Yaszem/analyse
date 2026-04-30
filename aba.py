@@ -125,27 +125,28 @@ OBJECTIF_HEURES = 210
 tab1, tab2, tab3, tab4 = st.tabs(["📅 Par Jour", "📆 Par Semaine", "📈 Par Mois", "🎯 Progression Objectif"])
 
 with tab1:
-    st.subheader("Heures de conduite par jour")
+    st.subheader("Courbe des heures de conduite par jour")
     daily = df.groupby('Date').agg(
         Heures=('Heures_Cond', 'sum'),
         Km=('Total_Km', 'sum')
     ).reset_index().sort_values('Date')
     
-    fig_daily = px.bar(daily, x='Date', y='Heures', text=daily['Heures'].round(1),
+    # Courbe des heures
+    fig_daily = px.line(daily, x='Date', y='Heures', markers=True,
                        labels={'Heures': 'Heures de conduite', 'Date': 'Jour'},
                        title="Heures conduites par jour")
-    fig_daily.update_traces(textposition='outside')
+    fig_daily.update_traces(line=dict(width=2))
     st.plotly_chart(fig_daily, use_container_width=True)
     
-    st.subheader("Kilomètres par jour")
-    fig_km = px.bar(daily, x='Date', y='Km', text=daily['Km'].round(1),
+    st.subheader("Courbe des kilomètres par jour")
+    fig_km = px.line(daily, x='Date', y='Km', markers=True,
                     labels={'Km': 'Kilomètres', 'Date': 'Jour'},
                     color_discrete_sequence=['#EF553B'])
-    fig_km.update_traces(textposition='outside')
+    fig_km.update_traces(line=dict(width=2))
     st.plotly_chart(fig_km, use_container_width=True)
 
 with tab2:
-    st.subheader("Heures de conduite par semaine")
+    st.subheader("Courbe des heures de conduite par semaine")
     weekly = df.groupby('Semaine').agg(
         Heures=('Heures_Cond', 'sum'),
         Km=('Total_Km', 'sum'),
@@ -154,37 +155,37 @@ with tab2:
     # Créer un libellé de semaine
     weekly['Libellé'] = weekly.apply(lambda r: f"S{r.Semaine} (du {r.Date_Min.strftime('%d/%m')})", axis=1)
     
-    fig_weekly = px.bar(weekly, x='Libellé', y='Heures', text=weekly['Heures'].round(1),
+    fig_weekly = px.line(weekly, x='Libellé', y='Heures', markers=True,
                         labels={'Heures': 'Heures', 'Libellé': 'Semaine'},
                         title="Heures par semaine")
-    fig_weekly.update_traces(textposition='outside')
+    fig_weekly.update_traces(line=dict(width=2))
     st.plotly_chart(fig_weekly, use_container_width=True)
     
-    st.subheader("Kilomètres par semaine")
-    fig_week_km = px.bar(weekly, x='Libellé', y='Km', text=weekly['Km'].round(1),
+    st.subheader("Courbe des kilomètres par semaine")
+    fig_week_km = px.line(weekly, x='Libellé', y='Km', markers=True,
                          labels={'Km': 'Km', 'Libellé': 'Semaine'},
                          color_discrete_sequence=['#EF553B'])
-    fig_week_km.update_traces(textposition='outside')
+    fig_week_km.update_traces(line=dict(width=2))
     st.plotly_chart(fig_week_km, use_container_width=True)
 
 with tab3:
-    st.subheader("Heures de conduite par mois")
+    st.subheader("Courbe des heures de conduite par mois")
     monthly = df.groupby('Mois').agg(
         Heures=('Heures_Cond', 'sum'),
         Km=('Total_Km', 'sum')
     ).reset_index().sort_values('Mois')
     
-    fig_monthly = px.bar(monthly, x='Mois', y='Heures', text=monthly['Heures'].round(1),
+    fig_monthly = px.line(monthly, x='Mois', y='Heures', markers=True,
                          labels={'Heures': 'Heures', 'Mois': 'Mois'},
                          title="Heures par mois")
-    fig_monthly.update_traces(textposition='outside')
+    fig_monthly.update_traces(line=dict(width=2))
     st.plotly_chart(fig_monthly, use_container_width=True)
     
-    st.subheader("Kilomètres par mois")
-    fig_monthly_km = px.bar(monthly, x='Mois', y='Km', text=monthly['Km'].round(1),
+    st.subheader("Courbe des kilomètres par mois")
+    fig_monthly_km = px.line(monthly, x='Mois', y='Km', markers=True,
                             labels={'Km': 'Km', 'Mois': 'Mois'},
                             color_discrete_sequence=['#EF553B'])
-    fig_monthly_km.update_traces(textposition='outside')
+    fig_monthly_km.update_traces(line=dict(width=2))
     st.plotly_chart(fig_monthly_km, use_container_width=True)
 
 with tab4:
