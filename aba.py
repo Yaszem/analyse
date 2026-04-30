@@ -39,7 +39,6 @@ def charger_donnees():
     response = supabase.table("trajets").select("*").order("date", desc=True).execute()
     if response.data:
         df = pd.DataFrame(response.data)
-        # Convertir les colonnes de temps
         df['date'] = pd.to_datetime(df['date']).dt.date
         return df
     else:
@@ -91,7 +90,7 @@ with st.sidebar:
         if st.form_submit_button("➕ Ajouter"):
             ajouter_trajet(date_trajet, heure_debut, heure_fin, pause_min, km_aller, km_retour)
             st.success("Trajet sauvegardé !")
-            st.rerun()  # Recharge la page pour afficher les nouvelles données
+            st.rerun()
 
 # ---------- Zone principale ----------
 if df.empty:
@@ -108,48 +107,70 @@ OBJECTIF_HEURES = 210
 tab1, tab2, tab3, tab4 = st.tabs(["📅 Par Jour", "📆 Par Semaine", "📈 Par Mois", "🎯 Progression Objectif"])
 
 with tab1:
-    st.subheader("Courbe des heures de conduite par jour")
-    daily = df.groupby('Date').agg(Heures=('Heures_Cond','sum'), Km=('Total_Km','sum')).reset_index().sort_values('Date')
-    fig_daily = px.line(daily, x='Date', y='Heures', markers=True,
-                        labels={'Heures':'Heures', 'Date':'Jour'},
-                        title="Heures conduites par jour")
-    fig_daily.update_traces(line=dict(width=2))
-    st.plotly_chart(fig_daily, use_container_width=True)
+    st.subheader("Courbes par jour")
+    daily = df.groupby('Date').agg(
+        Heures=('Heures_Cond','sum'),
+        Km=('Total_Km','sum')
+    ).reset_index().sort_values('Date')
 
-    st.subheader("Courbe des kilomètres par jour")
-    fig_km = px.line(daily, x='Date', y='Km', markers=True,
-                     labels={'Km':'Km', 'Date':'Jour'},
-                     color_discrete_sequence=['#EF553B'])
-    fig_km.update_traces(line=dict(width=2))
-    st.plotly_chart(fig_km, use_container_width=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        fig_heures = px.line(daily, x='Date', y='Heures', markers=True,
+                             labels={'Heures':'Heures', 'Date':'Jour'},
+                             title="Heures conduites par jour")
+        fig_heures.update_traces(line=dict(width=2, color='#1f77b4'))
+        st.plotly_chart(fig_heures, use_container_width=True)
+    with col2:
+        fig_km = px.line(daily, x='Date', y='Km', markers=True,
+                         labels={'Km':'Kilomètres', 'Date':'Jour'},
+                         title="Kilomètres par jour")
+        fig_km.update_traces(line=dict(width=2, color='#EF553B'))
+        st.plotly_chart(fig_km, use_container_width=True)
 
 with tab2:
-    st.subheader("Courbe des heures par semaine")
-    weekly = df.groupby('Semaine').agg(Heures=('Heures_Cond','sum'), Km=('Total_Km','sum'),
-                                       Date_Min=('Date','min')).reset_index().sort_values('Date_Min')
-    weekly['Libellé'] = weekly.apply(lambda r: f"S{r.Semaine} (du {r.Date_Min.strftime('%d/%m')})", axis=1)
-    fig_weekly = px.line(weekly, x='Libellé', y='Heures', markers=True, title="Heures par semaine")
-    fig_weekly.update_traces(line=dict(width=2))
-    st.plotly_chart(fig_weekly, use_container_width=True)
+    st.subheader("Courbes par semaine")
+    weekly = df.groupby('Semaine').agg(
+        Heures=('Heures_Cond','sum'),
+        Km=('Total_Km','sum'),
+        Date_Min=('Date','min')
+    ).reset_index().sort_values('Date_Min')
+    weekly['Libellé'] = weekly.apply(
+        lambda r: f"S{r.Semaine} (du {r.Date_Min.strftime('%d/%m')})", axis=1)
 
-    st.subheader("Courbe des kilomètres par semaine")
-    fig_week_km = px.line(weekly, x='Libellé', y='Km', markers=True,
-                          color_discrete_sequence=['#EF553B'])
-    fig_week_km.update_traces(line=dict(width=2))
-    st.plotly_chart(fig_week_km, use_container_width=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        fig_heures_w = px.line(weekly, x='Libellé', y='Heures', markers=True,
+                               labels={'Heures':'Heures', 'Libellé':'Semaine'},
+                               title="Heures par semaine")
+        fig_heures_w.update_traces(line=dict(width=2, color='#1f77b4'))
+        st.plotly_chart(fig_heures_w, use_container_width=True)
+    with col2:
+        fig_km_w = px.line(weekly, x='Libellé', y='Km', markers=True,
+                           labels={'Km':'Kilomètres', 'Libellé':'Semaine'},
+                           title="Kilomètres par semaine")
+        fig_km_w.update_traces(line=dict(width=2, color='#EF553B'))
+        st.plotly_chart(fig_km_w, use_container_width=True)
 
 with tab3:
-    st.subheader("Courbe des heures par mois")
-    monthly = df.groupby('Mois').agg(Heures=('Heures_Cond','sum'), Km=('Total_Km','sum')).reset_index().sort_values('Mois')
-    fig_monthly = px.line(monthly, x='Mois', y='Heures', markers=True, title="Heures par mois")
-    fig_monthly.update_traces(line=dict(width=2))
-    st.plotly_chart(fig_monthly, use_container_width=True)
+    st.subheader("Courbes par mois")
+    monthly = df.groupby('Mois').agg(
+        Heures=('Heures_Cond','sum'),
+        Km=('Total_Km','sum')
+    ).reset_index().sort_values('Mois')
 
-    st.subheader("Courbe des kilomètres par mois")
-    fig_monthly_km = px.line(monthly, x='Mois', y='Km', markers=True,
-                             color_discrete_sequence=['#EF553B'])
-    fig_monthly_km.update_traces(line=dict(width=2))
-    st.plotly_chart(fig_monthly_km, use_container_width=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        fig_heures_m = px.line(monthly, x='Mois', y='Heures', markers=True,
+                               labels={'Heures':'Heures', 'Mois':'Mois'},
+                               title="Heures par mois")
+        fig_heures_m.update_traces(line=dict(width=2, color='#1f77b4'))
+        st.plotly_chart(fig_heures_m, use_container_width=True)
+    with col2:
+        fig_km_m = px.line(monthly, x='Mois', y='Km', markers=True,
+                           labels={'Km':'Kilomètres', 'Mois':'Mois'},
+                           title="Kilomètres par mois")
+        fig_km_m.update_traces(line=dict(width=2, color='#EF553B'))
+        st.plotly_chart(fig_km_m, use_container_width=True)
 
 with tab4:
     st.subheader(f"🎯 Objectif {OBJECTIF_HEURES}h/mois")
@@ -157,7 +178,6 @@ with tab4:
     masque = df['Mois'] == dernier_mois
     total_heures = df.loc[masque, 'Heures_Cond'].sum()
     reste = max(0, OBJECTIF_HEURES - total_heures)
-    pourcentage = min(100, (total_heures/OBJECTIF_HEURES)*100)
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Heures effectuées", f"{total_heures:.1f} h")
@@ -201,6 +221,8 @@ with tab4:
 # Tableau récapitulatif
 st.divider()
 st.subheader("📋 Historique des trajets")
-st.dataframe(df[['Date', 'Heure_Debut', 'Heure_Fin', 'Pause_min', 'Km_Aller', 'Km_Retour', 'Heures_Cond', 'Total_Km']]
-             .sort_values('Date', ascending=False).reset_index(drop=True),
-             use_container_width=True)
+st.dataframe(
+    df[['Date', 'Heure_Debut', 'Heure_Fin', 'Pause_min', 'Km_Aller', 'Km_Retour', 'Heures_Cond', 'Total_Km']]
+    .sort_values('Date', ascending=False).reset_index(drop=True),
+    use_container_width=True
+)
