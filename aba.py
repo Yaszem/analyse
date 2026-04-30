@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta, date
-import io
+from supabase import create_client, Client
 
 # Configuration de la page
 st.set_page_config(
@@ -15,236 +15,192 @@ st.set_page_config(
 st.title("🚛 Suivi des heures de conduite - Objectif 210h/mois")
 st.markdown("Application de gestion de trajets pour chauffeur poids lourd")
 
-# Initialisation du dataframe en session_state
-if 'df' not in st.session_state:
-    st.session_state.df = pd.DataFrame(columns=[
-        'Date', 'Heure_Debut', 'Heure_Fin', 'Pause_min',
-        'Km_Aller', 'Km_Retour', 'Heures_Cond', 'Total_Km'
-    ])
+# ---------- Connexion à Supabase ----------
+@st.cache_resource
+def init_supabase():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
-# Fonctions utilitaires
+supabase = init_supabase()
+
+# ---------- Fonctions utilitaires ----------
 def calculer_duree(date_trajet, debut, fin, pause_min):
-    """Calcule la durée de conduite (fin - début - pause) en heures décimales."""
     debut_dt = datetime.combine(date_trajet, debut)
     fin_dt = datetime.combine(date_trajet, fin)
-    # Si l'heure de fin est avant celle de début, on considère que le trajet a eu lieu le lendemain
     if fin_dt < debut_dt:
         fin_dt += timedelta(days=1)
     duree_totale = (fin_dt - debut_dt).total_seconds() / 3600
     duree_conduite = duree_totale - (pause_min / 60)
-    return max(0, duree_conduite)  # On évite les valeurs négatives
+    return max(0, duree_conduite)
 
-# Barre latérale : Saisie des trajets
+def charger_donnees():
+    """Charge tous les trajets depuis Supabase."""
+    response = supabase.table("trajets").select("*").order("date", desc=True).execute()
+    if response.data:
+        df = pd.DataFrame(response.data)
+        # Convertir les colonnes de temps
+        df['date'] = pd.to_datetime(df['date']).dt.date
+        return df
+    else:
+        return pd.DataFrame(columns=[
+            'id', 'date', 'heure_debut', 'heure_fin', 'pause_min',
+            'km_aller', 'km_retour', 'heures_cond', 'total_km'
+        ])
+
+def ajouter_trajet(date, debut, fin, pause, km_a, km_r):
+    """Insère un trajet dans Supabase."""
+    duree = calculer_duree(date, debut, fin, pause)
+    total_km = km_a + km_r
+    data = {
+        'date': str(date),
+        'heure_debut': debut.strftime('%H:%M:%S'),
+        'heure_fin': fin.strftime('%H:%M:%S'),
+        'pause_min': pause,
+        'km_aller': km_a,
+        'km_retour': km_r,
+        'heures_cond': round(duree, 2),
+        'total_km': total_km
+    }
+    supabase.table("trajets").insert(data).execute()
+
+# ---------- Charger les données existantes ----------
+df = charger_donnees()
+
+# Renommer pour compatibilité avec le reste du code
+df.columns = ['Id', 'Date', 'Heure_Debut', 'Heure_Fin', 'Pause_min',
+              'Km_Aller', 'Km_Retour', 'Heures_Cond', 'Total_Km']
+
+# ---------- Barre latérale : Saisie ----------
 with st.sidebar:
-    st.header("📝 Saisir un nouveau trajet")
+    st.header("📝 Nouveau trajet")
     with st.form("form_trajet", clear_on_submit=True):
-        date_trajet = st.date_input("Date du trajet", value=date.today())
+        date_trajet = st.date_input("Date", value=date.today())
         col1, col2 = st.columns(2)
         with col1:
-            heure_debut = st.time_input("Heure de début", value=datetime.strptime("08:00", "%H:%M").time())
+            heure_debut = st.time_input("Début", value=datetime.strptime("08:00", "%H:%M").time())
         with col2:
-            heure_fin = st.time_input("Heure de fin", value=datetime.strptime("17:00", "%H:%M").time())
-        pause_min = st.number_input("Pause (minutes)", min_value=0, value=45, step=5)
+            heure_fin = st.time_input("Fin", value=datetime.strptime("17:00", "%H:%M").time())
+        pause_min = st.number_input("Pause (min)", min_value=0, value=45, step=5)
         col3, col4 = st.columns(2)
         with col3:
-            km_aller = st.number_input("Kilomètres Aller", min_value=0.0, value=0.0, step=10.0)
+            km_aller = st.number_input("Km Aller", min_value=0.0, value=0.0, step=10.0)
         with col4:
-            km_retour = st.number_input("Kilomètres Retour", min_value=0.0, value=0.0, step=10.0)
-        
-        submitted = st.form_submit_button("➕ Ajouter le trajet")
-        
-        if submitted:
-            duree = calculer_duree(date_trajet, heure_debut, heure_fin, pause_min)
-            total_km = km_aller + km_retour
-            nouveau = {
-                'Date': pd.to_datetime(date_trajet).date(),
-                'Heure_Debut': heure_debut,
-                'Heure_Fin': heure_fin,
-                'Pause_min': pause_min,
-                'Km_Aller': km_aller,
-                'Km_Retour': km_retour,
-                'Heures_Cond': round(duree, 2),
-                'Total_Km': total_km
-            }
-            st.session_state.df = pd.concat(
-                [st.session_state.df, pd.DataFrame([nouveau])],
-                ignore_index=True
-            )
-            st.success(f"Trajet ajouté ! {duree:.2f}h de conduite, {total_km:.0f} km")
+            km_retour = st.number_input("Km Retour", min_value=0.0, value=0.0, step=10.0)
 
-    st.divider()
-    # Sauvegarde et chargement des données (pour persistance sur Streamlit Cloud)
-    st.header("💾 Sauvegarde / Chargement")
-    
-    if not st.session_state.df.empty:
-        csv_buffer = io.StringIO()
-        st.session_state.df.to_csv(csv_buffer, index=False)
-        st.download_button(
-            label="📥 Télécharger les données (CSV)",
-            data=csv_buffer.getvalue(),
-            file_name="trajets_conduite.csv",
-            mime="text/csv"
-        )
-    
-    uploaded_file = st.file_uploader("📂 Charger un fichier CSV", type="csv")
-    if uploaded_file is not None:
-        df_charge = pd.read_csv(uploaded_file)
-        # Vérifier la présence des colonnes obligatoires
-        if set(['Date','Heure_Debut','Heure_Fin','Pause_min','Km_Aller','Km_Retour']).issubset(df_charge.columns):
-            # Convertir les dates
-            df_charge['Date'] = pd.to_datetime(df_charge['Date']).dt.date
-            # Recalculer Heures_Cond et Total_Km pour sécurité
-            for idx, row in df_charge.iterrows():
-                duree = calculer_duree(row['Date'], 
-                                       datetime.strptime(row['Heure_Debut'], '%H:%M:%S').time() if isinstance(row['Heure_Debut'], str) else row['Heure_Debut'],
-                                       datetime.strptime(row['Heure_Fin'], '%H:%M:%S').time() if isinstance(row['Heure_Fin'], str) else row['Heure_Fin'],
-                                       row['Pause_min'])
-                df_charge.at[idx, 'Heures_Cond'] = round(duree, 2)
-                df_charge.at[idx, 'Total_Km'] = row['Km_Aller'] + row['Km_Retour']
-            st.session_state.df = df_charge
-            st.success("Données chargées avec succès !")
-        else:
-            st.error("Le fichier CSV ne contient pas les colonnes requises.")
+        if st.form_submit_button("➕ Ajouter"):
+            ajouter_trajet(date_trajet, heure_debut, heure_fin, pause_min, km_aller, km_retour)
+            st.success("Trajet sauvegardé !")
+            st.rerun()  # Recharge la page pour afficher les nouvelles données
 
-# Zone principale : Analyses
-df = st.session_state.df
-
+# ---------- Zone principale ----------
 if df.empty:
-    st.info("Aucun trajet enregistré. Utilise le formulaire dans la barre latérale pour commencer.")
+    st.info("Aucun trajet. Ajoutes-en via le formulaire.")
     st.stop()
 
-# Préparer les colonnes temporelles pour l'agrégation
+# Nettoyage et préparation
 df['Date'] = pd.to_datetime(df['Date'])
 df['Semaine'] = df['Date'].dt.isocalendar().week.astype(int)
-df['Mois'] = df['Date'].dt.to_period('M').astype(str)  # ex: "2025-04"
-
-# Objectif mensuel
+df['Mois'] = df['Date'].dt.to_period('M').astype(str)
 OBJECTIF_HEURES = 210
 
-# ---- Onglets ----
+# Onglets
 tab1, tab2, tab3, tab4 = st.tabs(["📅 Par Jour", "📆 Par Semaine", "📈 Par Mois", "🎯 Progression Objectif"])
 
 with tab1:
     st.subheader("Courbe des heures de conduite par jour")
-    daily = df.groupby('Date').agg(
-        Heures=('Heures_Cond', 'sum'),
-        Km=('Total_Km', 'sum')
-    ).reset_index().sort_values('Date')
-    
-    # Courbe des heures
+    daily = df.groupby('Date').agg(Heures=('Heures_Cond','sum'), Km=('Total_Km','sum')).reset_index().sort_values('Date')
     fig_daily = px.line(daily, x='Date', y='Heures', markers=True,
-                       labels={'Heures': 'Heures de conduite', 'Date': 'Jour'},
-                       title="Heures conduites par jour")
+                        labels={'Heures':'Heures', 'Date':'Jour'},
+                        title="Heures conduites par jour")
     fig_daily.update_traces(line=dict(width=2))
     st.plotly_chart(fig_daily, use_container_width=True)
-    
+
     st.subheader("Courbe des kilomètres par jour")
     fig_km = px.line(daily, x='Date', y='Km', markers=True,
-                    labels={'Km': 'Kilomètres', 'Date': 'Jour'},
-                    color_discrete_sequence=['#EF553B'])
+                     labels={'Km':'Km', 'Date':'Jour'},
+                     color_discrete_sequence=['#EF553B'])
     fig_km.update_traces(line=dict(width=2))
     st.plotly_chart(fig_km, use_container_width=True)
 
 with tab2:
-    st.subheader("Courbe des heures de conduite par semaine")
-    weekly = df.groupby('Semaine').agg(
-        Heures=('Heures_Cond', 'sum'),
-        Km=('Total_Km', 'sum'),
-        Date_Min=('Date', 'min')
-    ).reset_index().sort_values('Date_Min')
-    # Créer un libellé de semaine
+    st.subheader("Courbe des heures par semaine")
+    weekly = df.groupby('Semaine').agg(Heures=('Heures_Cond','sum'), Km=('Total_Km','sum'),
+                                       Date_Min=('Date','min')).reset_index().sort_values('Date_Min')
     weekly['Libellé'] = weekly.apply(lambda r: f"S{r.Semaine} (du {r.Date_Min.strftime('%d/%m')})", axis=1)
-    
-    fig_weekly = px.line(weekly, x='Libellé', y='Heures', markers=True,
-                        labels={'Heures': 'Heures', 'Libellé': 'Semaine'},
-                        title="Heures par semaine")
+    fig_weekly = px.line(weekly, x='Libellé', y='Heures', markers=True, title="Heures par semaine")
     fig_weekly.update_traces(line=dict(width=2))
     st.plotly_chart(fig_weekly, use_container_width=True)
-    
+
     st.subheader("Courbe des kilomètres par semaine")
     fig_week_km = px.line(weekly, x='Libellé', y='Km', markers=True,
-                         labels={'Km': 'Km', 'Libellé': 'Semaine'},
-                         color_discrete_sequence=['#EF553B'])
+                          color_discrete_sequence=['#EF553B'])
     fig_week_km.update_traces(line=dict(width=2))
     st.plotly_chart(fig_week_km, use_container_width=True)
 
 with tab3:
-    st.subheader("Courbe des heures de conduite par mois")
-    monthly = df.groupby('Mois').agg(
-        Heures=('Heures_Cond', 'sum'),
-        Km=('Total_Km', 'sum')
-    ).reset_index().sort_values('Mois')
-    
-    fig_monthly = px.line(monthly, x='Mois', y='Heures', markers=True,
-                         labels={'Heures': 'Heures', 'Mois': 'Mois'},
-                         title="Heures par mois")
+    st.subheader("Courbe des heures par mois")
+    monthly = df.groupby('Mois').agg(Heures=('Heures_Cond','sum'), Km=('Total_Km','sum')).reset_index().sort_values('Mois')
+    fig_monthly = px.line(monthly, x='Mois', y='Heures', markers=True, title="Heures par mois")
     fig_monthly.update_traces(line=dict(width=2))
     st.plotly_chart(fig_monthly, use_container_width=True)
-    
+
     st.subheader("Courbe des kilomètres par mois")
     fig_monthly_km = px.line(monthly, x='Mois', y='Km', markers=True,
-                            labels={'Km': 'Km', 'Mois': 'Mois'},
-                            color_discrete_sequence=['#EF553B'])
+                             color_discrete_sequence=['#EF553B'])
     fig_monthly_km.update_traces(line=dict(width=2))
     st.plotly_chart(fig_monthly_km, use_container_width=True)
 
 with tab4:
-    st.subheader(f"🎯 Progression vers l'objectif de {OBJECTIF_HEURES}h/mois")
-    
-    # Filtrer le mois courant (le plus récent dans les données)
+    st.subheader(f"🎯 Objectif {OBJECTIF_HEURES}h/mois")
     dernier_mois = df['Mois'].max()
-    masque_mois = df['Mois'] == dernier_mois
-    total_heures_mois = df.loc[masque_mois, 'Heures_Cond'].sum()
-    reste = max(0, OBJECTIF_HEURES - total_heures_mois)
-    pourcentage = min(100, (total_heures_mois / OBJECTIF_HEURES) * 100)
-    
+    masque = df['Mois'] == dernier_mois
+    total_heures = df.loc[masque, 'Heures_Cond'].sum()
+    reste = max(0, OBJECTIF_HEURES - total_heures)
+    pourcentage = min(100, (total_heures/OBJECTIF_HEURES)*100)
+
     col1, col2, col3 = st.columns(3)
-    col1.metric("Heures effectuées", f"{total_heures_mois:.1f} h")
+    col1.metric("Heures effectuées", f"{total_heures:.1f} h")
     col2.metric("Objectif", f"{OBJECTIF_HEURES} h")
     col3.metric("Heures restantes", f"{reste:.1f} h")
-    
-    # Jauge
+
     fig_gauge = go.Figure(go.Indicator(
-        mode = "gauge+number+delta",
-        value = total_heures_mois,
-        domain = {'x': [0, 1], 'y': [0, 1]},
-        title = {'text': f"Progression - {dernier_mois}"},
-        delta = {'reference': OBJECTIF_HEURES, 'increasing': {'color': "red"}},
-        gauge = {
+        mode="gauge+number+delta",
+        value=total_heures,
+        domain={'x': [0,1], 'y': [0,1]},
+        title={'text': f"Progression - {dernier_mois}"},
+        delta={'reference': OBJECTIF_HEURES, 'increasing': {'color': "red"}},
+        gauge={
             'axis': {'range': [None, OBJECTIF_HEURES]},
             'bar': {'color': "darkblue"},
             'steps': [
                 {'range': [0, OBJECTIF_HEURES*0.5], 'color': "lightgray"},
-                {'range': [OBJECTIF_HEURES*0.5, OBJECTIF_HEURES*0.8], 'color': "gray"}],
+                {'range': [OBJECTIF_HEURES*0.5, OBJECTIF_HEURES*0.8], 'color': "gray"}
+            ],
             'threshold': {
                 'line': {'color': "red", 'width': 4},
                 'thickness': 0.75,
                 'value': OBJECTIF_HEURES
-                }
+            }
         }
     ))
     st.plotly_chart(fig_gauge, use_container_width=True)
-    
-    # Courbe d'évolution cumulée dans le mois
-    mois_actuel_df = df[masque_mois].sort_values('Date')
-    mois_actuel_df['Cumul_Heures'] = mois_actuel_df['Heures_Cond'].cumsum()
-    
-    if not mois_actuel_df.empty:
-        fig_cumul = px.line(mois_actuel_df, x='Date', y='Cumul_Heures',
-                            title="Évolution cumulée des heures dans le mois",
-                            labels={'Cumul_Heures': 'Heures cumulées', 'Date': 'Jour'})
+
+    mois_courant = df[masque].sort_values('Date')
+    mois_courant['Cumul'] = mois_courant['Heures_Cond'].cumsum()
+    if not mois_courant.empty:
+        fig_cumul = px.line(mois_courant, x='Date', y='Cumul',
+                            title="Évolution cumulée dans le mois",
+                            labels={'Cumul':'Heures cumulées', 'Date':'Jour'})
         fig_cumul.add_hline(y=OBJECTIF_HEURES, line_dash="dash", line_color="red",
                             annotation_text=f"Objectif {OBJECTIF_HEURES}h")
         st.plotly_chart(fig_cumul, use_container_width=True)
     else:
         st.info("Pas encore de données pour ce mois.")
 
-# Tableau récapitulatif des trajets
+# Tableau récapitulatif
 st.divider()
-st.subheader("📋 Journal des trajets")
-st.dataframe(
-    df[['Date', 'Heure_Debut', 'Heure_Fin', 'Pause_min', 'Km_Aller', 'Km_Retour', 'Heures_Cond', 'Total_Km']]
-    .sort_values('Date', ascending=False)
-    .reset_index(drop=True),
-    use_container_width=True
-)
+st.subheader("📋 Historique des trajets")
+st.dataframe(df[['Date', 'Heure_Debut', 'Heure_Fin', 'Pause_min', 'Km_Aller', 'Km_Retour', 'Heures_Cond', 'Total_Km']]
+             .sort_values('Date', ascending=False).reset_index(drop=True),
+             use_container_width=True)
